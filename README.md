@@ -16,9 +16,9 @@ For more problem details, please go to the [my persion web](weikunhan.github.io)
 The following packages are required (the version numbers that have been tested 
 are given for reference):
 
-Python 2.7 or 3.6
-Tensorflow 1.0.1
-Numpy 1.12.1
-Librosa 0.5.0
-tqdm 4.11.2 (only for preprocessing datasets)
-Sox 1.2.7 (only for preprocessing datasets)
+* Python 2.7 or 3.6
+* Tensorflow 1.0.1
+* Numpy 1.12.1
+* Librosa 0.5.0
+* tqdm 4.11.2 (only for preprocessing datasets)
+* Sox 1.2.7 (only for preprocessing datasets)
