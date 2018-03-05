@@ -10,7 +10,8 @@ The project uses Deep Learning (U-Net) to build model remove electronic noise
 and air noise during adversarial example transmission over the air. Our 
 contribution is to make the adversarial example attack to be a practical attack.
 
-For more problem details, please go to the [my persion web](weikunhan.github.io).
+For more problem details, please go to
+[my personal website](https://weikunhan.github.io).
 
 ## Requirements and Dependencies
 The following packages are required (the version numbers that have been tested 
