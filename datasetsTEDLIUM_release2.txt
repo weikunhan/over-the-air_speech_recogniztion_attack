@@ -1,0 +1,2 @@
+Please download datasets in
+http://www-lium.univ-lemans.fr/en/content/ted-lium-corpus
