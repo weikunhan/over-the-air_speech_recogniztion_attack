@@ -22,6 +22,10 @@ import csv
 import numpy as np
 import librosa
 
+#####################
+# CONVERTER FUNCTIONS
+#####################
+
 def get_original_noise_pairs(directory, dataset='train'):
     """ Get the pair directory of original and noise .wav file
 
@@ -106,6 +110,10 @@ def waveforms(filename_pair, channel='mono'):
                                                  mono=setting)
     return [original_waveform.reshape((-1, value)),
             noise_waveform.reshape((-1, value))]
+
+#####################
+# GENERATOR FUNCTIONS
+#####################
 
 def random_batch(batch_size, filename_pairs, channel='mono'):
     """ Randomly selets batch within list of target file name pair
