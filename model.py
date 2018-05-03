@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
 """ Model
 
-This module can use for build audio U-Net as the libary. You don't need modify
-any functions in the libary. Please see the description in front of each
-function if you don't undersand it. Please import this module if you want use
-this libary in anthor project.
+This module can use for build audio U-Net as the library. You don't need modify
+any functions in the library. Please see the description in front of each
+function if you don't understand it. Please import this module if you want use
+this library for another project. Note: prev_num_filters = num_channels
+input.shape = [channel_size(width), num_channels(channels)],
+filter.shape = [filter_size, prev_num_filters(channels), num_filter]
 
 ################################################################################
 # Author: Weikun Han <weikunhan@gmail.com>
 # Crate Date: 03/6/2018
-# Update:
+# Update: 04/26/2018
 # Reference: https://github.com/jhetherly/EnglishSpeechUpsampler
 ################################################################################
 """
@@ -23,7 +25,8 @@ import tensorflow as tf
 def comprehensive_variable_summaries(var):
     """
     Attach a lot of summaries to a Tensor (for TensorBoard visualization).
-    reference: https://www.tensorflow.org/programmers_guide/summaries_and_tensorboard
+    reference: 
+        https://www.tensorflow.org/programmers_guide/summaries_and_tensorboard
     """
     with tf.name_scope('summaries'):
         mean = tf.reduce_mean(var)
@@ -38,6 +41,8 @@ def comprehensive_variable_summaries(var):
 def histogram_variable_summaries(var):
     """
     Attach a histogram summary to a Tensor (for TensorBoard visualization).
+    reference:
+        https://www.tensorflow.org/programmers_guide/tensorboard_histograms
     """
     with tf.name_scope('summaries'):
         tf.summary.histogram('histogram', var)
@@ -46,12 +51,15 @@ def histogram_variable_summaries(var):
 # LAYER HELPER FUNCTIONS
 ########################
 
-def subpixel_reshuffling_helper(input_tensor, num_channels):
+def subpixel_shuffling_helper(input_tensor, num_channels):
     """ The helper function for build subpixel reshuffling layer
 
     performs a 1-D subpixel reshuffle of the input 2-D tensor
-    assumes the last dimension of X is the filter dimension
     ref: https://github.com/Tetrachrome/subpixel
+
+    5/1/2018 Note: this function just let input_tensor.shape = [-1, x]
+    and residual_tensor.shape = [-1, y] to yield input_tensor = [y, -1]
+    , which -1 means flat.
 
     Args:
         param1 (tensor): input_tensor
@@ -64,15 +72,20 @@ def subpixel_reshuffling_helper(input_tensor, num_channels):
     """
 
     # The tensor pass '[-1,]' to flatten 'tensor'
-    # The axis=1 means split the channels the same as resifual tensor channels
+    # The axis=1 means split the channels the same as residual tensor channels
     return tf.transpose(
-        tf.stack([tf.reshape(x, [-1, ])
+        tf.stack([tf.reshape(x, [-1])
                  for x in tf.split(input_tensor, num_channels, axis=1)]))
 
-def subpixel_reshuffling(input_tensor, num_channels, name=None):
+def subpixel_shuffling(input_tensor, num_channels, name=None):
     """ Entrance function of a subpixel reshuffling layer
 
-    This function is selest each 2D tensor in input 3D tensor.
+    This function is want change input_tensor num_channel to be channel_size,
+    and this channel_size is equal to the residual_tensor's num_channel.
+
+    For example:
+    t = tf.constant([[[1, 1, 1], [2, 2, 2]], [[3, 3, 3], [4, 4, 4]]])
+    t.get_shape()  # [2, 2, 3]
 
     Args:
         param1 (tensor): input_tensor
@@ -84,17 +97,16 @@ def subpixel_reshuffling(input_tensor, num_channels, name=None):
 
     """
 
-    # From 3D tensor (input_tensor) selet each 2D tensor (x)
-    # The num_channels is the residual tensor filter_size
+    # Use tf.map_fn to input tensor to be [None, channel_size(width)]
     return tf.map_fn(
-        lambda x: subpixel_reshuffling_helper(x, num_channels),
+        lambda x: subpixel_shuffling_helper(x, num_channels),
                   input_tensor,
                   name=name)
 
-def stack_subpixel_helper(input_tensor,
-                          stack_prev_num_filters,
-                          stack_num_filters,
-                          name=None):
+def stacking_subpixel_helper(input_tensor,
+                             stack_prev_num_filters,
+                             stack_num_filters,
+                             name=None):
     """ The function for stacking subpixel reshuffling layers
 
     This function is to stack more 2D tensor in 3D tensor. Performs a subpixel
@@ -151,13 +163,13 @@ def stack_subpixel_helper(input_tensor,
                      axis=1,
                      name=name)
 
-def stack_subpixel(input_tensor,
-                   stack_prev_num_filters,
-                   stack_num_filters=None,
-                   name=None):
+def stacking_subpixel(input_tensor,
+                      stack_prev_num_filters,
+                      stack_num_filters=None,
+                      name=None):
     """ Entrance function of stacking subpixel reshuffling layers
 
-    This function identfy how many filters need for stacking.
+    This function identify how many filters need for stacking.
     If we want to stack 2D tensor and keep same elements, we need change
     number of filters in current layer.
 
@@ -188,18 +200,18 @@ def stack_subpixel(input_tensor,
             # If find the elements fits all final set, stop it
             if size_change >= size_goal:
                 break
-    return subpixel_restack_helper(imput_tensor,
-                                   stack_prev_num_filters,
-                                   stack_num_filters,
-                                   name=name)
+    return stacking_subpixel_helper(input_tensor,
+                                    stack_prev_num_filters,
+                                    stack_num_filters,
+                                    name=name)
 
 def batch_normalization(input_tensor, is_training, scope):
-    """ Build general batch normalizaion function
+    """ Build general batch normalization function
 
-    This function is use for add batch normalization for deep neural netwok.
+    This function is use for add batch normalization for deep neural network.
     In the neural network training, when the convergence speed is very slow, or
-    when a gradient explosion or other untrainable condition is encountered,
-    batch normalizaion can be tried to solve. In addition, batch normalizaion
+    when a gradient explosion or other un-trainable condition is encountered,
+    batch normalization can be tried to solve. In addition, batch normalization
     can also be added under normal usage to speed up training and
     improve model accuracy.
 
@@ -209,11 +221,11 @@ def batch_normalization(input_tensor, is_training, scope):
         param3 (str): scope
 
     Returns:
-        tensor: output layer add the batch normaliazation function
+        tensor: output layer add the batch normalization function
 
     """
 
-    # Selet batch nomalization is use for training or not traning
+    # Select batch normalization is use for training or not training
     return tf.cond(is_training,
                    lambda: tf.contrib.layers.batch_norm(input_tensor,
                                                         decay=0.99,
@@ -230,7 +242,7 @@ def batch_normalization(input_tensor, is_training, scope):
                                                         scale=True,
                                                         updates_collections=None,
                                                         scope=scope,
-                                                        reuse=False))
+                                                        reuse=True))
 
 def weight_variables(shape, name=None):
     """ Build normal distributions generator
@@ -264,7 +276,7 @@ def bias_variables(shape, name=None):
         param2 (str): name
 
     Returns:
-        list: the tensorfolw veriable
+        list: the tensorflow variable
 
     """
     initial = tf.constant(0.1, shape=shape)
@@ -278,23 +290,23 @@ def convolution_1d_act(input_tensor,
                        prev_num_filters,
                        filter_size,
                        num_filters,
-                       active_function,
                        layer_number,
+                       active_function,
                        stride=1,
                        padding='VALID',
                        tensorboard_output=False,
                        name=None):
     """ Build a single convolution layer with active function
 
-    The function build a single convolution layer with intial weight and bias.
-    Also add the active function for this single covolution layer
+    The function build a single convolution layer with initial weight and bias.
+    Also add the active function for this single convolution layer
 
     Args:
         param1 (tensor): pre_tensor
         param2 (int): prev_num_filters
         param3 (int): filter_size
         param4 (int): num_filters
-        param5 (funtion): active_function
+        param5 (function): active_function
         param6 (int): layer_number
         param7 (int): stride
         param8 (str): padding
@@ -308,20 +320,19 @@ def convolution_1d_act(input_tensor,
 
     # Define the filter
     with tf.name_scope('{}_layer_conv_weights'.format(layer_number)):
-        w = weight_variable(
-            [filter_size, prev_num_filters, num_filters])
+        w = weight_variables([filter_size, prev_num_filters, num_filters])
 
         if tensorboard_output:
             histogram_variable_summaries(w)
 
     # Define the bias
     with tf.name_scope('{}_layer_conv_biases'.format(layer_number)):
-        b = bias_variable([num_filters])
+        b = bias_variables([num_filters])
 
         if tensorboard_output:
             histogram_variable_summaries(b)
 
-    # Create the single convolution laryer
+    # Create the single convolution layer
     with tf.name_scope('{}_layer_conv_preactivation'.format(layer_number)):
         conv = tf.nn.conv1d(input_tensor, w, stride=stride, padding=padding) + b
 
@@ -334,33 +345,35 @@ def convolution_1d_act(input_tensor,
 
         if tensorboard_output:
             histogram_variable_summaries(conv_act)
+
     return conv_act
 
-def downsampling_d1_batch_norm_act(input_tensor,
+def downsampling_1d_batch_norm_act(input_tensor,
                                    filter_size,
-                                   stride,
                                    layer_number,
-                                   active_function=tf.nn.relu,
-                                   is_training=True,
+                                   stride,
                                    num_filters=None,
+                                   active_function=tf.nn.relu,
                                    padding='VALID',
+                                   is_training=True,
                                    tensorboard_output=False,
                                    name=None):
     """ Build a single downsampling layer
 
-    The function build a single convolution layer with intial weight and bias.
+    The function build a single convolution layer with initial weight and bias.
     Also add  the batch normalization for this single convolution layer.
-    Also add the active function for this single covolution layer.
+    Also add the active function for this single convolution layer.
+    Remember you need set the stride for using this function
 
     Args:
         param1 (tensor): input_tensor
         param2 (int): filter_size
-        param3 (int): stride
-        param4 (int): layer_number
-        param5 (funtion): active_function
-        param6 (bool): is_training
-        param7 (int): num_filters
-        param8 (str): padding
+        param3 (int): layer_number
+        param4 (int): stride
+        param5 (int): num_filters
+        param6 (function): active_function
+        param7 (str): padding
+        param8 (bool): is_training
         param9 (bool): tensorboard_output
         param10 (str): name
 
@@ -377,8 +390,8 @@ def downsampling_d1_batch_norm_act(input_tensor,
     # Define the filter
     with tf.name_scope('{}_layer_conv_weights'.format(layer_number)):
 
-        # input_tensor.get_shape().as_list()[-1] is pre_num_fitlters
-        w = weight_variable(
+        # input_tensor.get_shape().as_list()[-1] is pre_num_filters
+        w = weight_variables(
             [filter_size, input_tensor.get_shape().as_list()[-1], num_filters])
 
         if tensorboard_output:
@@ -386,19 +399,19 @@ def downsampling_d1_batch_norm_act(input_tensor,
 
     # Define the bias
     with tf.name_scope('{}_layer_conv_biases'.format(layer_number)):
-        b = bias_variable([num_filters])
+        b = bias_variables([num_filters])
 
         if tensorboard_output:
             histogram_variable_summaries(b)
 
-    # Create the single convolution laryer
+    # Create the single convolution layer
     with tf.name_scope('{}_layer_conv_preactivation'.format(layer_number)):
         conv = tf.nn.conv1d(input_tensor, w, stride=stride, padding=padding) + b
 
         if tensorboard_output:
             histogram_variable_summaries(conv)
 
-    # Add the batch nomalization at output of conlution laryer
+    # Add the batch normalization at output of convolution layer
     with tf.name_scope('{}_layer_batch_norm'.format(layer_number)) as scope:
         conv_batch_norm = batch_normalization(conv, is_training, scope)
 
@@ -408,41 +421,41 @@ def downsampling_d1_batch_norm_act(input_tensor,
 
         if tensorboard_output:
             histogram_variable_summaries(conv_batch_norm_act)
-    return conv_batch_normal_act
+
+    return conv_batch_norm_act
 
 def upsampling_d1_batch_normal_act_subpixel(input_tensor,
                                             residual_tensor,
-                                            filter_size,
-                                            stride=1
+                                            filter_size,              
                                             layer_number,
-                                            active_function=tf.nn.relu,
-                                            is_training=True,
                                             num_filters=None,
+                                            active_function=tf.nn.relu,
                                             padding='VALID',
+                                            is_training=True,
                                             tensorboard_output=False,
                                             name=None):
     """ Build a single upsampling layer
 
-    The function build a single convolution layer with intial weight and bias.
+    The function build a single convolution layer with initial weight and bias.
     Also add  the batch normalization for this single convolution layer.
-    Also add the active function for this single covolution layer.
+    Also add the active function for this single convolution layer.
     Also a subpixel convolution that reorders information along one
     dimension to expand the other dimensions.
-    Also final convolutional layer with restacking and reordering operations
-    is residually added to the original input to yield the upsampled waveform.
+    Also final convolution layer with re-stacking and reordering operations
+    is add to the original input to yield the up-sampling waveform.
+    Remember in the stride in this layer is fixed (1), you do not need to change
 
     Args:
         param1 (tensor): input_tensor
         param2 (tensor): residual_tensor
         param3 (int): filter_size
-        param4 (int): stride
-        param5 (int): layer_number
+        param4 (int):  layer_number
+        param5 (int): num_filters
         param6 (funtion): active_function
-        param7 (bool): is_training
-        param8 (int): num_filters
-        param9 (str): padding
-        param10 (bool): tensorboard_output
-        param11 (str): name
+        param7 (str): padding
+        param8 (bool): is_training
+        param9 (bool): tensorboard_output
+        param10 (str): name
 
     Returns:
         tensor: representing the output of the operation
@@ -458,7 +471,7 @@ def upsampling_d1_batch_normal_act_subpixel(input_tensor,
     with tf.name_scope('{}_layer_conv_weights'.format(layer_number)):
 
         # input_tensor.get_shape().as_list()[-1] is pre_num_fitlters
-        w = weight_variable(
+        w = weight_variables(
             [filter_size, input_tensor.get_shape().as_list()[-1], num_filters])
 
         if tensorboard_output:
@@ -466,21 +479,21 @@ def upsampling_d1_batch_normal_act_subpixel(input_tensor,
 
     # Define the bias
     with tf.name_scope('{}_layer_conv_biases'.format(layer_number)):
-        b = bias_variable([num_filters])
+        b = bias_variables([num_filters])
 
         if tensorboard_output:
             histogram_variable_summaries(b)
 
     # Create the single convolution laryer
     with tf.name_scope('{}_layer_conv_preactivation'.format(layer_number)):
-        conv = tf.nn.conv1d(input_tensor, w, stride=stride, padding=padding) + b
+        conv = tf.nn.conv1d(input_tensor, w, stride=1, padding=padding) + b
 
         if tensorboard_output:
             histogram_variable_summaries(conv)
 
     # Add the batch nomalization at output of conlution laryer
     with tf.name_scope('{}_layer_batch_norm'.format(layer_number)) as scope:
-        conv_batch_norm = batch_normalization(l, is_training, scope)
+        conv_batch_norm = batch_normalization(conv, is_training, scope)
 
     # Add the active function
     with tf.name_scope('{}_layer_conv_activation'.format(layer_number)):
@@ -491,7 +504,7 @@ def upsampling_d1_batch_normal_act_subpixel(input_tensor,
 
     # Build a subpixel shuffling layer
     with tf.name_scope('{}_layer_subpixel_reshuffle'.format(layer_number)):
-        subpixel_conv = subpixel_reshuffling(
+        subpixel_conv = subpixel_shuffling(
             conv_batch_norm_act,
             residual_tensor.get_shape().as_list()[-1],
             name=name)
@@ -512,6 +525,7 @@ def upsampling_d1_batch_normal_act_subpixel(input_tensor,
 
         if tensorboard_output:
             histogram_variable_summaries(stack_subpixel_conv)
+
     return stack_subpixel_conv
 
 #################################
@@ -555,74 +569,76 @@ def audio_u_net_dnn(input_type,
         tensor: representing the output of the operation
 
     """
-
+    
     print('The network summary for {}'.format(scope_name))
-
+    
     # Create list to store layers
     downsample_layers = []
     upsample_layers = []
+    layer_count = 1
 
     with tf.name_scope(scope_name):
 
         # is_training variable
         train_flag = tf.placeholder(tf.bool)
 
-        # input of the model (examples)
+        # The first dimension of the placeholder is None, 
+        # meaning we can have any number of rows.
         audio = [None]
-
+        
         for n in input_shape:
-            audio.append(i)
+            audio.append(n)
 
         x = tf.placeholder(input_type, shape=audio)
 
         # The last second value in list is input audio size
         input_size = audio[-2]
 
-        # The last one vaule in list in input audio channels
+        # The last one value in list in input audio channels
         num_channels = audio[-1]
 
-        print(' input: {}'.format(x.get_shape().as_list()[1:]))
+        print('    input: {}'.format(x.get_shape().as_list()[1:]))
 
         # Build the first downsampling layer
-        d1 = downsampling_d1_batch_norm_act(
+        d1 = downsampling_1d_batch_norm_act(
             x,
             filter_size=initial_filter_size,
+            layer_number=layer_count,
             stride=initial_stride,
-            tensorboard_output=tensorboard_output,
-            num_filters=channel_multiple * num_channels,
             is_training=train_flag,
-            layer_number=1)
+            tensorboard_output=tensorboard_output,
+            num_filters=channel_multiple * num_channels)
         downsample_layers.append(d1)
 
-        print(' downsample layer: {}'.format(d1.get_shape().as_list()[1:]))
+        print('    downsample layer: {}'.format(d1.get_shape().as_list()[1:]))
 
-        layer_count = 2
+        layer_count += 1
 
         # Build next 7 downsampling layer
-        for i in range(number_of_downsample_layers - 1):
-            d = downsampling_d1_batch_norm_act(
+        for i in range(num_downsample_layers - 1):
+            d = downsampling_1d_batch_norm_act(
                 downsample_layers[-1],
                 filter_size=downsample_filter_size,
+                layer_number=layer_count,
                 stride=downsample_stride,
-                tensorboard_output=tensorboard_output,
                 is_training=train_flag,
-                layer_number=layer_count)
+                tensorboard_output=tensorboard_output)
             downsample_layers.append(d)
 
-            print(' downsample layer: {}'.format(d.get_shape().as_list()[1:]))
+            print('    downsample layer: {}'.format(d.get_shape().as_list()[1:]))
 
             layer_count += 1
 
         # Build one bottleneck layer
-        b = downsampling_d1_batch_norm_act(
+        b = downsampling_1d_batch_norm_act(
             downsample_layers[-1],
             filter_size=bottleneck_filter_size,
+            layer_number=layer_count,
             stride=bottleneck_stride,
-            tensorboard_output=tensorboard_output,
             is_training=train_flag,
-            layer_number=layer_count)
+            tensorboard_output=tensorboard_output)
 
-        print(' bottleneck layer: {}'.format(bn.get_shape().as_list()[1:]))
+        print('    bottleneck layer: {}'.format(b.get_shape().as_list()[1:]))
 
         layer_count += 1
 
@@ -630,14 +646,14 @@ def audio_u_net_dnn(input_type,
         u1 = upsampling_d1_batch_normal_act_subpixel(
             b,
             downsample_layers[-1],
-            num_filters=b.get_shape().as_list()[-1],
             filter_size=upsample_filter_size,
-            tensorboard_output=tensorboard_output,
+            layer_number=layer_count,
             is_training=train_flag,
-            layer_number=layer_count)
+            tensorboard_output=tensorboard_output,
+            num_filters=b.get_shape().as_list()[-1])
         upsample_layers.append(u1)
 
-        print(' upsample layer: {}'.format(u1.get_shape().as_list()[1:]))
+        print('    upsample layer: {}'.format(u1.get_shape().as_list()[1:]))
 
         layer_count += 1
 
@@ -647,22 +663,21 @@ def audio_u_net_dnn(input_type,
                 upsample_layers[-1],
                 downsample_layers[i],
                 filter_size=upsample_filter_size,
-                tensorboard_output=tensorboard_output,
+                layer_number=layer_count,
                 is_training=train_flag,
-                layer_number=layer_count)
+                tensorboard_output=tensorboard_output)
             upsample_layers.append(u)
 
-            print(' upsample layer: {}'.format(u.get_shape().as_list()[1:]))
+            print('    upsample layer: {}'.format(u.get_shape().as_list()[1:]))
 
             layer_count += 1
 
         # Build last restack layer to map downsampling layer
         target_size = int(input_size / initial_stride)
-        restack = stack_subpixel(
-            upsample_layers[-1],
-            target_size + (upsample_filter_size - 1))
+        restack = stacking_subpixel(
+            upsample_layers[-1], target_size + (upsample_filter_size - 1))
 
-        print(' restack layer: {}'.format(restack.get_shape().as_list()[1:]))
+        print('    restack layer: {}'.format(restack.get_shape().as_list()[1:]))
 
         # Add the convolution layer with restack layer
         conv_act = convolution_1d_act(
@@ -670,18 +685,18 @@ def audio_u_net_dnn(input_type,
             prev_num_filters=restack.get_shape().as_list()[-1],
             filter_size=upsample_filter_size,
             num_filters=initial_stride,
-            active_function=tf.nn.elu,
             layer_number=layer_count,
+            active_function=tf.nn.elu,
             tensorboard_output=tensorboard_output)
 
-        print(' final convolution layer: {}'.format(
+        print('    final convolution layer: {}'.format(
             conv_act.get_shape().as_list()[1:]))
 
         # NOTE this effectively is a linear activation on the last conv layer
-        subpixel_conv = subpixel_reshuffling(conv_act, num_channels)
+        subpixel_conv = subpixel_shuffling(conv_act, num_channels)
         y = tf.add(subpixel_conv, x, name=scope_name)
 
-        print(' output: {}'.format(y.get_shape().as_list()[1:]))
+        print('    output: {}'.format(y.get_shape().as_list()[1:]))
         print('--------------------Finished model building--------------------')
 
     return train_flag, x, y
