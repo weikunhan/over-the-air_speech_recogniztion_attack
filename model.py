@@ -5,13 +5,13 @@ This module can use for build audio U-Net as the library. You don't need modify
 any functions in the library. Please see the description in front of each
 function if you don't understand it. Please import this module if you want use
 this library for another project. Note: prev_num_filters = num_channels
-input.shape = [channel_size(width), num_channels(channels)],
+input.shape = [batch_size, channel_size(width), num_channels(channels)],
 filter.shape = [filter_size, prev_num_filters(channels), num_filter]
 
 ################################################################################
 # Author: Weikun Han <weikunhan@gmail.com>
 # Crate Date: 03/6/2018
-# Update: 04/26/2018
+# Update: 05/05/2018
 # Reference: https://github.com/jhetherly/EnglishSpeechUpsampler
 ################################################################################
 """
@@ -31,8 +31,10 @@ def comprehensive_variable_summaries(var):
     with tf.name_scope('summaries'):
         mean = tf.reduce_mean(var)
         tf.summary.scalar('mean', mean)
+
         with tf.name_scope('stddev'):
             stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+
         tf.summary.scalar('stddev', stddev)
         tf.summary.scalar('max', tf.reduce_max(var))
         tf.summary.scalar('min', tf.reduce_min(var))
@@ -57,9 +59,11 @@ def subpixel_shuffling_helper(input_tensor, num_channels):
     performs a 1-D subpixel reshuffle of the input 2-D tensor
     ref: https://github.com/Tetrachrome/subpixel
 
-    5/1/2018 Note: this function just let input_tensor.shape = [-1, x]
-    and residual_tensor.shape = [-1, y] to yield input_tensor = [y, -1]
-    , which -1 means flat.
+    5/1/2018 Note: this function just let input_tensor.shape = [None, -1, x]
+    and residual_tensor.shape = [None, -1, y] to yield
+    input_tensor = [None, -1, y], which -1 means flat.
+    Here, let the input_tensor channels shrieked. Therefore, the
+    channel_size(width) of input_tensor increase. This is the upsampling method.
 
     Args:
         param1 (tensor): input_tensor
@@ -71,6 +75,8 @@ def subpixel_shuffling_helper(input_tensor, num_channels):
 
     """
 
+    #print(input_tensor.get_shape().as_list())  # For debug
+
     # The tensor pass '[-1,]' to flatten 'tensor'
     # The axis=1 means split the channels the same as residual tensor channels
     return tf.transpose(
@@ -80,12 +86,12 @@ def subpixel_shuffling_helper(input_tensor, num_channels):
 def subpixel_shuffling(input_tensor, num_channels, name=None):
     """ Entrance function of a subpixel reshuffling layer
 
-    This function is want change input_tensor num_channel to be channel_size,
-    and this channel_size is equal to the residual_tensor's num_channel.
+    This function maps over the batch dimension. The first index is batch
+    dimension
 
     For example:
     t = tf.constant([[[1, 1, 1], [2, 2, 2]], [[3, 3, 3], [4, 4, 4]]])
-    t.get_shape()  # [2, 2, 3]
+    t.get_shape()  # [2, 2, 3] , 2 is batch size
 
     Args:
         param1 (tensor): input_tensor
@@ -104,7 +110,7 @@ def subpixel_shuffling(input_tensor, num_channels, name=None):
                   name=name)
 
 def stacking_subpixel_helper(input_tensor,
-                             stack_prev_num_filters,
+                             channel_size,
                              stack_num_filters,
                              name=None):
     """ The function for stacking subpixel reshuffling layers
@@ -114,7 +120,7 @@ def stacking_subpixel_helper(input_tensor,
 
     Args:
         param1 (tensor): input_tensor
-        param2 (int): stack_prev_num_filters
+        param2 (int): channel_size
         param3 (str): stack_num_filters
         param4 (str): name
 
@@ -123,15 +129,14 @@ def stacking_subpixel_helper(input_tensor,
 
     """
 
-    # Record the filter size for input tensor
-    filter_size = tf.shape(input_tensor)[0]
+    # Record the batch size for input tensor
+    batch_size = tf.shape(input_tensor)[0]
 
     # Get number of 2D tensor we need
-    need_prev_num_filters = (stack_prev_num_filters -
-                             input_tensor.get_shape().as_list()[1])
+    need_channel_size = (channel_size - input_tensor.get_shape().as_list()[1])
 
     # Calculter total new spece need for stacking
-    total_new_space = need_prev_num_filters * stack_num_filters
+    total_new_space = need_channel_size * stack_num_filters
 
     # Slice the input tensor for stacking, cut from number of filters need for
     # this stacking
@@ -141,17 +146,17 @@ def stacking_subpixel_helper(input_tensor,
 
     # Reshape stack tensor to 2D tensor, and cut form total new spece need for
     # this stacking
-    stack_tensor = tf.slice(tf.reshape(stack_tensor, [filter_size, -1]),
+    stack_tensor = tf.slice(tf.reshape(stack_tensor, [batch_size, -1]),
                             [0, 0],
                             [-1, total_new_space])
 
     # Reshpe this 2D tensor to the 3D tensor
-    stack_tensor = tf.reshape(stack_tensor, [filter_size, -1, stack_num_filters])
+    stack_tensor = tf.reshape(stack_tensor, [batch_size, -1, stack_num_filters])
 
     # Slice the stack tensor from number of previous filter need
     stack_tensor = tf.slice(stack_tensor,
                             [0, 0, 0],
-                            [-1, need_prev_num_filters, -1])
+                            [-1, need_channel_size, -1])
 
     # Get the base tensor to stack on
     base_tensor = tf.slice(input_tensor,
@@ -164,7 +169,7 @@ def stacking_subpixel_helper(input_tensor,
                      name=name)
 
 def stacking_subpixel(input_tensor,
-                      stack_prev_num_filters,
+                      channel_size,
                       stack_num_filters=None,
                       name=None):
     """ Entrance function of stacking subpixel reshuffling layers
@@ -175,7 +180,7 @@ def stacking_subpixel(input_tensor,
 
     Args:
         param1 (tensor): input_tensor
-        param2 (int): stack_prev_num_filters
+        param2 (int): channel_size
         param3 (str): stack_num_filters
         param4 (str): name
 
@@ -183,25 +188,26 @@ def stacking_subpixel(input_tensor,
         tensor: output stacking subpixel reshuffling layers for 3D tensor
 
     """
-    prev_num_filters = input_tensor.get_shape().as_list()[1]
-    num_filters = input_tensor.get_shape().as_list()[2]
-    need_prev_num_filters = stack_prev_num_filters - prev_num_filters
+    prev_channel_size = input_tensor.get_shape().as_list()[1]
+    need_channel_size = channel_size - prev_channel_size
+    prev_num_filters = input_tensor.get_shape().as_list()[2]
 
     if stack_num_filters is None:
 
         # Start a loop keep reduce number of filter to search number of stack
         # filter we need
-        for i in range(1, num_filters):
-            reduce_num_filters = i
-            stack_num_filters = num_filters - reduce_num_filters
-            size_change = reduce_num_filters * prev_num_filters
-            size_goal = stack_num_filters * need_prev_num_filters
+        for i in range(1, prev_num_filters):
+            reduce_prev_num_filters = i
+            stack_num_filters = prev_num_filters - reduce_prev_num_filters
+            size_change = reduce_prev_num_filters * prev_channel_size
+            size_goal = stack_num_filters * need_channel_size
 
             # If find the elements fits all final set, stop it
             if size_change >= size_goal:
                 break
+
     return stacking_subpixel_helper(input_tensor,
-                                    stack_prev_num_filters,
+                                    channel_size,
                                     stack_num_filters,
                                     name=name)
 
@@ -509,16 +515,20 @@ def upsampling_d1_batch_normal_act_subpixel(input_tensor,
             residual_tensor.get_shape().as_list()[-1],
             name=name)
 
+        #print(subpixel_conv.get_shape().as_list())  # For debug
+
         if tensorboard_output:
             histogram_variable_summaries(subpixel_conv)
 
     # In order to combined final stacking residual connections
+    # Here, we need make sure the residual tensor have same
+    # channel_size(width) with subpixel_conv. Therefore, we sliced it first.
     with tf.name_scope('{}_layer_stacking'.format(layer_number)):
         sliced = tf.slice(residual_tensor,
                           begin=[0, 0, 0],
                           size=[-1, subpixel_conv.get_shape().as_list()[1], -1])
 
-        # Stack number of filters (the channels)
+        # Stack number of filters (the channels) to keep upsampling
         stack_subpixel_conv = tf.concat((subpixel_conv, sliced),
                                          axis=2,
                                          name=name)
@@ -597,7 +607,7 @@ def audio_u_net_dnn(input_type,
         # The last one value in list in input audio channels
         num_channels = audio[-1]
 
-        print('    input: {}'.format(x.get_shape().as_list()[1:]))
+        print('    input: {}'.format(x.get_shape().as_list()))
 
         # Build the first downsampling layer
         d1 = downsampling_1d_batch_norm_act(
@@ -605,12 +615,12 @@ def audio_u_net_dnn(input_type,
             filter_size=initial_filter_size,
             layer_number=layer_count,
             stride=initial_stride,
+            num_filters=channel_multiple * num_channels,
             is_training=train_flag,
-            tensorboard_output=tensorboard_output,
-            num_filters=channel_multiple * num_channels)
+            tensorboard_output=tensorboard_output)
         downsample_layers.append(d1)
 
-        print('    downsample layer: {}'.format(d1.get_shape().as_list()[1:]))
+        print('    downsample layer: {}'.format(d1.get_shape().as_list()))
 
         layer_count += 1
 
@@ -625,7 +635,7 @@ def audio_u_net_dnn(input_type,
                 tensorboard_output=tensorboard_output)
             downsample_layers.append(d)
 
-            print('    downsample layer: {}'.format(d.get_shape().as_list()[1:]))
+            print('    downsample layer: {}'.format(d.get_shape().as_list()))
 
             layer_count += 1
 
@@ -638,7 +648,7 @@ def audio_u_net_dnn(input_type,
             is_training=train_flag,
             tensorboard_output=tensorboard_output)
 
-        print('    bottleneck layer: {}'.format(b.get_shape().as_list()[1:]))
+        print('    bottleneck layer: {}'.format(b.get_shape().as_list()))
 
         layer_count += 1
 
@@ -648,16 +658,16 @@ def audio_u_net_dnn(input_type,
             downsample_layers[-1],
             filter_size=upsample_filter_size,
             layer_number=layer_count,
+            num_filters=b.get_shape().as_list()[-1],
             is_training=train_flag,
-            tensorboard_output=tensorboard_output,
-            num_filters=b.get_shape().as_list()[-1])
+            tensorboard_output=tensorboard_output)
         upsample_layers.append(u1)
 
-        print('    upsample layer: {}'.format(u1.get_shape().as_list()[1:]))
+        print('    upsample layer: {}'.format(u1.get_shape().as_list()))
 
         layer_count += 1
 
-        # Build the next 6 layer upsampling layer
+        # Build the next 7 layer upsampling layer
         for i in range(num_downsample_layers - 2, -1, -1):
             u = upsampling_d1_batch_normal_act_subpixel(
                 upsample_layers[-1],
@@ -668,7 +678,7 @@ def audio_u_net_dnn(input_type,
                 tensorboard_output=tensorboard_output)
             upsample_layers.append(u)
 
-            print('    upsample layer: {}'.format(u.get_shape().as_list()[1:]))
+            print('    upsample layer: {}'.format(u.get_shape().as_list()))
 
             layer_count += 1
 
@@ -677,7 +687,7 @@ def audio_u_net_dnn(input_type,
         restack = stacking_subpixel(
             upsample_layers[-1], target_size + (upsample_filter_size - 1))
 
-        print('    restack layer: {}'.format(restack.get_shape().as_list()[1:]))
+        print('    restack layer: {}'.format(restack.get_shape().as_list()))
 
         # Add the convolution layer with restack layer
         conv_act = convolution_1d_act(
@@ -690,13 +700,13 @@ def audio_u_net_dnn(input_type,
             tensorboard_output=tensorboard_output)
 
         print('    final convolution layer: {}'.format(
-            conv_act.get_shape().as_list()[1:]))
+            conv_act.get_shape().as_list()))
 
         # NOTE this effectively is a linear activation on the last conv layer
         subpixel_conv = subpixel_shuffling(conv_act, num_channels)
         y = tf.add(subpixel_conv, x, name=scope_name)
 
-        print('    output: {}'.format(y.get_shape().as_list()[1:]))
+        print('    output: {}'.format(y.get_shape().as_list()))
         print('--------------------Finished model building--------------------')
 
     return train_flag, x, y
