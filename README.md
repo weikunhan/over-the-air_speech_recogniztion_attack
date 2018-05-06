@@ -22,7 +22,6 @@ and use following code to install dependencies:
 conda install -c conda-forge tensorflow 
 conda install -c conda-forge tqdm
 conda install -c conda-forge librosa
-conda install -c conda-forge sox
 ```
 The following packages are required (the version numbers that have been tested 
 are given for reference):
@@ -31,6 +30,6 @@ are given for reference):
 * Tensorflow 1.0.1
 * Numpy 1.12.1
 * Librosa 0.5.0
-* tqdm 4.11.2 (only for preprocessing datasets)
-* SoX 14.4.2 (only for preprocessing datasets)
-* pysox 1.2.7 (brew install sox)
+* tqdm 4.11.2
+* SoX 14.4.2 (for Mac: brew install sox, for Ubuntu: apt-get install sox)
+* pysox 1.3.0 (pip install sox)
